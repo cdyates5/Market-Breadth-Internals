@@ -1,0 +1,60 @@
+name: Refresh S&P 500 internals dashboard
+
+# Rebuilds the dashboard from live Wikipedia + Yahoo data and publishes it to GitHub Pages.
+on:
+  schedule:
+    # 22:30 UTC, Tue–Sat. Each run captures the prior US cash-session close
+    # (US close 20:00–21:00 UTC), so Tue–Sat UTC covers Mon–Fri US sessions.
+    # UTC because GitHub cron ignores local time; 22:30 UTC = 08:30/09:30 Melbourne.
+    - cron: '30 22 * * 2-6'
+  workflow_dispatch:        # lets you trigger a rebuild by hand from the Actions tab
+
+# Least-privilege: no write to repo contents; only what Pages deployment needs.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; queue instead of cancelling a run mid-publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Rebuild dashboard
+        run: python sp500_internals_rebuild.py
+
+      - name: Stage site
+        run: |
+          test -s sp500_internals_weekly.html   # fail loudly rather than deploy an empty page
+          mkdir -p public
+          cp sp500_internals_weekly.html public/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
